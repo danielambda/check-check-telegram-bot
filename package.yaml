@@ -1,0 +1,43 @@
+name: check-check-telegram-bot
+version: 0.1.0.0
+executable:
+  main: Main.hs
+  source-dirs: src
+
+  dependencies:
+  - check-check-backend-contracts
+  - smart-primitives
+
+  - base
+  - containers
+  - telegram-bot-simple
+  - telegram-bot-api
+  - http-client
+  - servant
+  - servant-client
+  - servant-client-core
+  - servant-auth
+  - servant-auth-client
+  - aeson
+  - bytestring
+  - mtl
+  - uuid
+  - text
+  - optics
+  - resource-pool
+  - time
+  - jose
+
+  ghc-options:
+  - -threaded
+  - -rtsopts
+  - -with-rtsopts=-N
+  - -Wall
+  - -Wcompat
+  - -Widentities
+  - -Wincomplete-record-updates
+  - -Wincomplete-uni-patterns
+  - -Wmissing-export-lists
+  - -Wmissing-home-modules
+  - -Wpartial-fields
+  - -Wredundant-constraints
