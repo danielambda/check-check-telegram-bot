@@ -26,6 +26,28 @@ packages:
   original:
     commit: d00cdc3b2d85621a5afae21c81b6dbcb5bec32e5
     git: https://github.com/danielambda/check-check-backend-contracts.git
+- completed:
+    commit: 487625510914e4ccea0744220571b9e937c58c75
+    git: https://github.com/danielambda/telegram-bot-fsafe
+    name: telegram-bot-fsafe
+    pantry-tree:
+      sha256: d683f7705c77a945e272368376b98161143a06d63a038699d3d8767516fb3338
+      size: 1258
+    version: 0.1.0.0
+  original:
+    commit: 487625510914e4ccea0744220571b9e937c58c75
+    git: https://github.com/danielambda/telegram-bot-fsafe
+- completed:
+    commit: e3416f4b973fff4ea5d9ce860c74ea57b9f412ad
+    git: https://github.com/danielambda/telegram-bot-message-dsl
+    name: telegram-bot-message-dsl
+    pantry-tree:
+      sha256: 13956972b643f2930707857fef460ee2ff9a7b4aa8c3c6140446f5bf1c75361a
+      size: 1856
+    version: 0.1.0.0
+  original:
+    commit: e3416f4b973fff4ea5d9ce860c74ea57b9f412ad
+    git: https://github.com/danielambda/telegram-bot-message-dsl
 snapshots:
 - completed:
     sha256: 1964d439d2a152be4238053f3f997a09fb348391984daab86d724975ef9a423f
