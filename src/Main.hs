@@ -4,96 +4,23 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Main (main) where
 
-import Telegram.Bot.API
-  ( BotName(..), Update, defaultTelegramClientEnv , userUsername
-  , responseResult
-  , updateChatId
-  )
-import Telegram.Bot.Simple
-  ( BotApp(..), Eff, startBot_, getEnvToken
-  , conversationBot
-  )
-import Control.Applicative ((<|>))
-import Control.Monad.Reader ( ReaderT (..))
-import Control.Monad (unless)
+import Telegram.Bot.API (updateChatId)
 import Network.HTTP.Client (defaultManagerSettings, newManager)
-import Orphan ()
 import qualified Telegram.Bot.API as TG
-import Servant.Client (runClientM, mkClientEnv, BaseUrl, ClientEnv, parseBaseUrl)
+import Servant.Client (mkClientEnv, BaseUrl, parseBaseUrl)
 import System.Environment (getEnv)
-import Telegram.Bot.Simple.UpdateParser (parseUpdate, command, commandWithBotName, callbackQueryDataRead)
-import Telegram.Bot.AppM (AppEnv(..), Eff')
-import Telegram.Bot.FSA (State(..), Transition(..))
-import qualified Telegram.Bot.FSA.Transitions.AddContact as AddContact
-import qualified Telegram.Bot.FSA.Transitions.CancelSelectingRequestRecipient as CancelSelectingRequestRecipient
-import qualified Telegram.Bot.FSA.Transitions.Id as Id
-import qualified Telegram.Bot.FSA.Transitions.SelectReceiptItem as SelectReceiptItem
-import qualified Telegram.Bot.FSA.Transitions.SelectRequestRecipient as SelectRequestRecipient
-import qualified Telegram.Bot.FSA.Transitions.ShowReceipt as ShowReceipt
-import qualified Telegram.Bot.FSA.Transitions.Start as Start
-import qualified Telegram.Bot.FSA.Transitions.StartSelectingRequestRecipient as StartSelectingRequestRecipient
-import qualified Telegram.Bot.FSA.Transitions.CancelViewingReceipt as CancelViewingReceipt
-import qualified Telegram.Bot.FSA.Transitions.CancelSelectingReceiptItems as CancelSelecintReceiptItems
-
-mkBotApp :: ClientEnv -> ClientEnv -> String -> BotName -> BotApp State Transition
-mkBotApp backendClientEnv authClientEnv secret botName = BotApp
-  { botInitialModel = InitialState
-  , botAction = flip $ decideTransition botName
-  , botHandler = botHandler
-  , botJobs = []
-  } where
-    botHandler = fmap nt . handleTransition
-    nt :: Eff' transition state -> Eff transition state
-    nt = flip runReaderT AppEnv{..}
-
-decideTransition :: BotName -> State -> Update -> Maybe Transition
-decideTransition (BotName botName) state = parseUpdate parser
-  where
-    command' cmd = command cmd <|> commandWithBotName botName cmd
-
-    parser = case state of
-      InitialState
-         -> ShowReceipt <$> (command' "qr" <|> command' "receipt")
-        <|> AddContact <$> command' "contact"
-        <|> Start <$ command' "start"
-
-      ViewingReceipt{} -> callbackQueryDataWhich isAllowed where
-        isAllowed CancelViewingReceipt{} = True
-        isAllowed SelectReceiptItem{} = True
-        isAllowed _ = False
-
-      SelectingReceiptItems{} -> callbackQueryDataWhich isAllowed where
-        isAllowed SelectReceiptItem{} = True
-        isAllowed CancelSelecingReceiptItems{} = True
-        isAllowed StartSelectingRequestRecipient{} = True
-        isAllowed _ = False
-
-      SelectingRequestRecipient{} -> callbackQueryDataWhich isAllowed where
-        isAllowed SelectRequestRecipient{} = True
-        isAllowed CancelSelectingRequestRecipient{} = True
-        isAllowed _ = False
-      where
-        callbackQueryDataWhich isAllowed = do
-          transition <- callbackQueryDataRead
-          unless (isAllowed transition) $
-            fail "unsupported transition"
-          return transition
-
-handleTransition :: Transition -> State -> Eff' Transition State
-handleTransition Id = Id.handleTransition
-handleTransition Start = Start.handleTransition
-handleTransition (AddContact contact) = AddContact.handleTransition contact
-handleTransition CancelViewingReceipt = CancelViewingReceipt.handleTransition
-handleTransition (ShowReceipt qr) = ShowReceipt.handleTransition qr
-handleTransition (ShowReceipt' qr items) = ShowReceipt.handleTransition' qr items
-handleTransition (SelectReceiptItem i) = SelectReceiptItem.handleTransition i
-handleTransition CancelSelecingReceiptItems = CancelSelecintReceiptItems.handleTransition
-handleTransition StartSelectingRequestRecipient = StartSelectingRequestRecipient.handleTransition
-handleTransition CancelSelectingRequestRecipient = CancelSelectingRequestRecipient.handleTransition
-handleTransition (SelectRequestRecipient recipientId) = SelectRequestRecipient.handleTransition recipientId
+import Telegram.Bot.AppM (AppEnv(..), AppM (..))
+import Telegram.Bot.FSA
+import Telegram.Bot.FSAfe (hoistStartKeyedBot_, getEnvToken, BotM)
+import Control.Monad.Reader (ReaderT(..), MonadIO (..))
+import Optics ((&))
+import Control.Monad.Except (runExceptT)
+import Control.Monad.State (evalStateT)
+import Data.Proxy (Proxy (..))
 
 data RunConfig = RunConfig
   { authApiKey :: String
@@ -102,18 +29,28 @@ data RunConfig = RunConfig
   , authClientBaseUrl :: BaseUrl
   }
 
+type FSA =
+ '[ '(InitialState, '[Start, ShowReceipt, AddContact])
+  , '(ViewingReceipt, '[SelectReceiptItem, Cancel])
+  , '(SelectingReceiptItems, '[SelectReceiptItem, StartSelectingRequestRecipient, Cancel])
+  , '(SelectingRequestRecipient, '[SelectRequestRecipient, Cancel])
+  ]
+
 run :: RunConfig -> IO ()
 run RunConfig{..} = do
-  tgEnv <- defaultTelegramClientEnv tgToken
-  mBotName <- either (error . show) (userUsername . responseResult) <$> runClientM TG.getMe tgEnv
-  let botName = maybe (error "bot name is not defined") BotName mBotName
-
   manager <- newManager defaultManagerSettings
   let beClientEnv = mkClientEnv manager beClientBaseUrl
   let authClientEnv = mkClientEnv manager authClientBaseUrl
+  let appEnv = AppEnv beClientEnv authClientEnv authApiKey
 
-  let botApp = conversationBot updateChatId $ mkBotApp beClientEnv authClientEnv authApiKey botName
-  startBot_ botApp tgEnv
+  hoistStartKeyedBot_ fsa (nt appEnv) updateChatId InitialState tgToken
+  where
+    fsa = Proxy :: Proxy FSA
+    nt :: AppEnv -> AppM a -> BotM a
+    nt appEnv appM = unAppM appM `runReaderT` appEnv `evalStateT` Nothing & runExceptT >>= \case
+      Right a -> return a
+      Left err -> do liftIO $ print err
+                     fail ""
 
 main :: IO ()
 main = do
