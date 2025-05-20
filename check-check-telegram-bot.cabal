@@ -1,8 +1,4 @@
-cabal-version: 1.12
-
--- This file has been generated from package.yaml by hpack version 0.37.0.
---
--- see: https://github.com/sol/hpack
+cabal-version: 3.0
 
 name:           check-check-telegram-bot
 version:        0.1.0.0
@@ -15,23 +11,25 @@ executable check-check-telegram-bot
       Clients.Backend
       Clients.Utils
       Models
-      Orphan
       Telegram.Bot.AppM
       Telegram.Bot.FSA
-      Telegram.Bot.FSA.Transitions.AddContact
-      Telegram.Bot.FSA.Transitions.CancelSelectingReceiptItems
-      Telegram.Bot.FSA.Transitions.CancelSelectingRequestRecipient
-      Telegram.Bot.FSA.Transitions.CancelViewingReceipt
-      Telegram.Bot.FSA.Transitions.Id
-      Telegram.Bot.FSA.Transitions.SelectReceiptItem
-      Telegram.Bot.FSA.Transitions.SelectRequestRecipient
-      Telegram.Bot.FSA.Transitions.ShowReceipt
-      Telegram.Bot.FSA.Transitions.Start
-      Telegram.Bot.FSA.Transitions.StartSelectingRequestRecipient
-      Telegram.Bot.UI
       Paths_check_check_telegram_bot
   hs-source-dirs:
       src
+  default-extensions:
+      ConstraintKinds
+      DataKinds
+      DefaultSignatures
+      DerivingStrategies
+      DerivingVia
+      FunctionalDependencies
+      GADTs
+      NoStarIsType
+      PolyKinds
+      StandaloneKindSignatures
+      TypeApplications
+      TypeFamilies
+      TypeOperators
   ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
       aeson
@@ -51,8 +49,9 @@ executable check-check-telegram-bot
     , servant-client-core
     , smart-primitives
     , telegram-bot-api
-    , telegram-bot-simple
+    , telegram-bot-fsafe
+    , telegram-bot-message-dsl
     , text
     , time
     , uuid
-  default-language: Haskell2010
+  default-language: GHC2021

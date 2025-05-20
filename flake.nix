@@ -1,70 +1,56 @@
 {
-  description = "Check-Check backend flake";
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    systems.url = "github:nix-systems/default";
-    flake-utils = {
-      url = "github:numtide/flake-utils";
-      inputs.systems.follows = "systems";
-    };
+    nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
+    flake-parts.url = "github:hercules-ci/flake-parts";
+    haskell-flake.url = "github:srid/haskell-flake";
+
+    smart-primitives.url              = "github:danielambda/smart-primitives";
+    check-check-backend-contracts.url = "github:danielambda/check-check-backend-contracts";
+    telegram-bot-fsafe.url            = "github:danielambda/telegram-bot-fsafe";
+    telegram-bot-message-dsl.url            = "github:danielambda/telegram-bot-message-dsl";
   };
 
-  outputs = { nixpkgs, flake-utils, ... }:
-    flake-utils.lib.eachDefaultSystem (system:
-      let
-        pkgs = nixpkgs.legacyPackages.${system};
-        hPkgs = pkgs.haskell.packages.ghc984;
+  outputs = inputs@{ nixpkgs, flake-parts, ... }:
+    flake-parts.lib.mkFlake { inherit inputs; } {
+      systems = nixpkgs.lib.systems.flakeExposed;
+      imports = [inputs.haskell-flake.flakeModule];
+      perSystem = { self', config, pkgs, ... }:
+        let
+          telegram-bot = self'.packages.check-check-telegram-bot;
+          telegram-bot-image = pkgs.dockerTools.buildLayeredImage {
+            name = "check-check-telegram-bot";
+            tag = "latest";
 
-        packages = [
-          pkgs.nixd
+            contents = [telegram-bot pkgs.cacert];
 
-          hPkgs.ghc
-          hPkgs.ghcid
-          hPkgs.haskell-language-server
-          pkgs.stack
-
-          pkgs.zlib
-        ];
-
-        smart-primitives-src = pkgs.fetchFromGitHub {
-          owner = "danielambda";
-          repo = "smart-primitives";
-          rev = "03193ff51a339bccaa3250f40b9d2fa032782824";
-          sha256 = "1kg4y228qqj5685sygnydfpd3mkrrm97l50rzkp7bwg0w0gda2lv";
-        };
-
-        check-check-backend-contracts-src = pkgs.fetchFromGitHub {
-          owner = "danielambda";
-          repo = "check-check-backend-contracts";
-          rev = "d00cdc3b2d85621a5afae21c81b6dbcb5bec32e5";
-          sha256 = "1kgjxknwgkx8ymfffbz6sjj0r5iajg089f68dfs1dz6hbsvmshj9";
-        };
-
-        smart-primitives = hPkgs.callCabal2nix "smart-primitives" smart-primitives-src {};
-        check-check-backend-contracts = hPkgs.callCabal2nix "check-check-backend-contracts" check-check-backend-contracts-src {
-          inherit smart-primitives;
-        };
-
-        telegram-bot = hPkgs.callCabal2nix "telegram-bot" ./. {
-          inherit smart-primitives check-check-backend-contracts;
-        };
-
-        telegram-bot-image = pkgs.dockerTools.buildLayeredImage {
-          name = "check-check-telegram-bot";
-          tag = "latest";
-
-          contents = [telegram-bot pkgs.cacert];
-
-          config.Entrypoint = ["${telegram-bot}/bin/check-check-telegram-bot"];
-        };
+            config.Entrypoint = ["${telegram-bot}/bin/check-check-telegram-bot"];
+          };
       in {
-        devShell = pkgs.mkShell {
-          inherit packages;
-
-          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath packages;
+        haskellProjects.default = {
+          autoWire = ["packages" "apps"];
+          packages = {
+            smart-primitives.source = inputs.smart-primitives;
+            check-check-backend-contracts.source = inputs.check-check-backend-contracts;
+            telegram-bot-fsafe.source = inputs.telegram-bot-fsafe;
+            telegram-bot-message-dsl.source = inputs.telegram-bot-message-dsl;
+          };
         };
 
-        packages.telegram-bot-image = telegram-bot-image;
-      }
-    );
+        devShells.default = pkgs.mkShell {
+          inputsFrom = [config.haskellProjects.default.outputs.devShell];
+          packages = [pkgs.nixd];
+
+          shellHook = ''
+            set -a
+            source ./.env
+            set +a
+          '';
+        };
+
+        packages = {
+          default = telegram-bot;
+          inherit telegram-bot-image;
+        };
+      };
+    };
 }
