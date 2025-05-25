@@ -7,7 +7,6 @@
     smart-primitives.url              = "github:danielambda/smart-primitives";
     check-check-backend-contracts.url = "github:danielambda/check-check-backend-contracts";
     telegram-bot-fsafe.url            = "github:danielambda/telegram-bot-fsafe";
-    telegram-bot-message-dsl.url            = "github:danielambda/telegram-bot-message-dsl";
   };
 
   outputs = inputs@{ nixpkgs, flake-parts, ... }:
@@ -32,7 +31,6 @@
             smart-primitives.source = inputs.smart-primitives;
             check-check-backend-contracts.source = inputs.check-check-backend-contracts;
             telegram-bot-fsafe.source = inputs.telegram-bot-fsafe;
-            telegram-bot-message-dsl.source = inputs.telegram-bot-message-dsl;
           };
         };
 

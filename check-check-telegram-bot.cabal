@@ -12,7 +12,6 @@ executable check-check-telegram-bot
       Clients.Utils
       Models
       Telegram.Bot.AppM
-      Telegram.Bot.FSA
       Paths_check_check_telegram_bot
   hs-source-dirs:
       src
@@ -49,8 +48,8 @@ executable check-check-telegram-bot
     , servant-client-core
     , smart-primitives
     , telegram-bot-api
+    , telegram-bot-simple
     , telegram-bot-fsafe
-    , telegram-bot-message-dsl
     , text
     , time
     , uuid

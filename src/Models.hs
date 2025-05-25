@@ -34,6 +34,12 @@ data ReceiptItem = ReceiptItem
   , quantity :: Double
   } deriving (Show, Read)
 
+instance Eq ReceiptItem where
+  ReceiptItem{index=i} == ReceiptItem{index=j} = i == j
+
+instance Ord ReceiptItem where
+  ReceiptItem{index=i} <= ReceiptItem{index=j} = i <= j
+
 instance FromResp ReceiptItemResp ReceiptItem where
   fromResp ReceiptItemResp{price = Positive price, quantity = Positive quantity, ..} =
     ReceiptItem{..}

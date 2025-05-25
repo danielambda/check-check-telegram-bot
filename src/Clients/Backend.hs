@@ -9,6 +9,7 @@ module Clients.Backend
   , getMe
   , createContact, getContacts, deleteContact
   , sendRequest
+  , BackendClientM
   ) where
 
 import Data.Proxy (Proxy(..))

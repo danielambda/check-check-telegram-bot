@@ -56,24 +56,6 @@
         "type": "github"
       }
     },
-    "flake-parts_3": {
-      "inputs": {
-        "nixpkgs-lib": "nixpkgs-lib_3"
-      },
-      "locked": {
-        "lastModified": 1743550720,
-        "narHash": "sha256-hIshGgKZCgWh6AYJpJmRgFdR3WUbkY04o82X05xqQiY=",
-        "owner": "hercules-ci",
-        "repo": "flake-parts",
-        "rev": "c621e8422220273271f52058f618c94e405bb0f5",
-        "type": "github"
-      },
-      "original": {
-        "owner": "hercules-ci",
-        "repo": "flake-parts",
-        "type": "github"
-      }
-    },
     "flake-utils": {
       "inputs": {
         "systems": [
@@ -146,21 +128,6 @@
         "type": "github"
       }
     },
-    "haskell-flake_3": {
-      "locked": {
-        "lastModified": 1746938027,
-        "narHash": "sha256-MGvizJ6t2DyTZlI/uAyIYSompqAotUbgzHvPn3jYDYk=",
-        "owner": "srid",
-        "repo": "haskell-flake",
-        "rev": "6531204f95cc83daafb740ccfaacdf50eba117ff",
-        "type": "github"
-      },
-      "original": {
-        "owner": "srid",
-        "repo": "haskell-flake",
-        "type": "github"
-      }
-    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1741865919,
@@ -193,21 +160,6 @@
       }
     },
     "nixpkgs-lib_2": {
-      "locked": {
-        "lastModified": 1743296961,
-        "narHash": "sha256-b1EdN3cULCqtorQ4QeWgLMrd5ZGOjLSLemfa00heasc=",
-        "owner": "nix-community",
-        "repo": "nixpkgs.lib",
-        "rev": "e4822aea2a6d1cdd36653c134cacfd64c97ff4fa",
-        "type": "github"
-      },
-      "original": {
-        "owner": "nix-community",
-        "repo": "nixpkgs.lib",
-        "type": "github"
-      }
-    },
-    "nixpkgs-lib_3": {
       "locked": {
         "lastModified": 1743296961,
         "narHash": "sha256-b1EdN3cULCqtorQ4QeWgLMrd5ZGOjLSLemfa00heasc=",
@@ -270,22 +222,6 @@
         "type": "github"
       }
     },
-    "nixpkgs_5": {
-      "locked": {
-        "lastModified": 1747533086,
-        "narHash": "sha256-+8goyptSXa7qV0k5uPKyky58jpBjI/qkzsbwCZFvhRY=",
-        "owner": "nixos",
-        "repo": "nixpkgs",
-        "rev": "8406224e30c258025cb8b31704bdb977a8f1f009",
-        "type": "github"
-      },
-      "original": {
-        "owner": "nixos",
-        "ref": "nixpkgs-unstable",
-        "repo": "nixpkgs",
-        "type": "github"
-      }
-    },
     "root": {
       "inputs": {
         "check-check-backend-contracts": "check-check-backend-contracts",
@@ -293,8 +229,7 @@
         "haskell-flake": "haskell-flake",
         "nixpkgs": "nixpkgs_2",
         "smart-primitives": "smart-primitives",
-        "telegram-bot-fsafe": "telegram-bot-fsafe",
-        "telegram-bot-message-dsl": "telegram-bot-message-dsl_2"
+        "telegram-bot-fsafe": "telegram-bot-fsafe"
       }
     },
     "smart-primitives": {
@@ -351,56 +286,19 @@
       "inputs": {
         "flake-parts": "flake-parts_2",
         "haskell-flake": "haskell-flake_2",
-        "nixpkgs": "nixpkgs_4",
-        "telegram-bot-message-dsl": "telegram-bot-message-dsl"
+        "nixpkgs": "nixpkgs_4"
       },
       "locked": {
-        "lastModified": 1747758640,
-        "narHash": "sha256-Au/4JmBbpU8l8vXYUDyOOF2q4bgzxsqVCIUgh9PnLRU=",
+        "lastModified": 1748202769,
+        "narHash": "sha256-SEzrbyRAYfGzuR4YeZdQwst1DmUENOqCHc94STr6GWw=",
         "owner": "danielambda",
         "repo": "telegram-bot-fsafe",
-        "rev": "1994119d234b1bedbc2dbbba33c8a26257a0c711",
+        "rev": "556f9bb0635d0b4fba462411fb651258060434f7",
         "type": "github"
       },
       "original": {
         "owner": "danielambda",
         "repo": "telegram-bot-fsafe",
-        "type": "github"
-      }
-    },
-    "telegram-bot-message-dsl": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1747743750,
-        "narHash": "sha256-Vkhima7lLOVHIg1daboCQlCHbdB4vny3OMoTeXcIkmU=",
-        "owner": "danielambda",
-        "repo": "telegram-bot-message-dsl",
-        "rev": "0fecdff69fdb74918900eb7c928037f830616d6f",
-        "type": "github"
-      },
-      "original": {
-        "owner": "danielambda",
-        "repo": "telegram-bot-message-dsl",
-        "type": "github"
-      }
-    },
-    "telegram-bot-message-dsl_2": {
-      "inputs": {
-        "flake-parts": "flake-parts_3",
-        "haskell-flake": "haskell-flake_3",
-        "nixpkgs": "nixpkgs_5"
-      },
-      "locked": {
-        "lastModified": 1747743750,
-        "narHash": "sha256-Vkhima7lLOVHIg1daboCQlCHbdB4vny3OMoTeXcIkmU=",
-        "owner": "danielambda",
-        "repo": "telegram-bot-message-dsl",
-        "rev": "0fecdff69fdb74918900eb7c928037f830616d6f",
-        "type": "github"
-      },
-      "original": {
-        "owner": "danielambda",
-        "repo": "telegram-bot-message-dsl",
         "type": "github"
       }
     }

@@ -3,9 +3,10 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Clients.Utils
-  ( runReq, runReq_
+  ( runReq_, RunReq(..)
   , AsKeyedClientM(..)
   , HasKeyedClientEnv(..)
   , FromClientError(..)
@@ -32,22 +33,21 @@ class HasKeyedClientEnv a (key :: Symbol) where
 class FromClientError a where
   fromClientError :: ClientError -> a
 
-runReq :: forall clientM key m env err a.
+class MonadIO m => RunReq clientM m where
+  runReq :: clientM a -> m a
+
+instance
   ( AsKeyedClientM clientM key
   , MonadIO m, MonadReader env m, HasKeyedClientEnv env key
   , MonadError err m, FromClientError err
-  ) => clientM a -> m a
-runReq req = do
-  clientEnv <- asks $ getClientEnv $ Proxy @key
-  result <- liftIO $ runClientM (asClientM req) clientEnv
-  liftEither $ mapLeft fromClientError result
-  where
-    mapLeft f (Left a) = Left $ f a
-    mapLeft _ (Right r) = Right r
+  ) => RunReq clientM m where
+  runReq req = do
+    clientEnv <- asks $ getClientEnv $ Proxy @key
+    result <- liftIO $ runClientM (asClientM req) clientEnv
+    liftEither $ mapLeft fromClientError result
+    where
+      mapLeft f (Left a) = Left $ f a
+      mapLeft _ (Right r) = Right r
 
-runReq_ ::
-  ( AsKeyedClientM clientM clientKey
-  , MonadIO m, MonadReader env m, HasKeyedClientEnv env clientKey
-  , MonadError err m, FromClientError err
-  ) => clientM a -> m ()
+runReq_ :: RunReq clientM m => clientM a -> m ()
 runReq_ = void . runReq
