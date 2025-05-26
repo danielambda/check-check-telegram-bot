@@ -12,7 +12,7 @@
 
 module Main (main) where
 
-import Telegram.Bot.API (updateChatId, InlineKeyboardButton, ParseMode (..))
+import Telegram.Bot.API (updateChatId, ParseMode (..), User (..), SomeReplyMarkup (..))
 import Network.HTTP.Client (defaultManagerSettings, newManager)
 import Data.Proxy
 import qualified Telegram.Bot.API as TG
@@ -20,8 +20,8 @@ import Servant.Client
 import System.Environment (getEnv)
 import Telegram.Bot.AppM (authViaTelegram, currentUser, AppM (..), AppEnv (..))
 import GHC.Float (divideDouble)
-import Control.Monad.Reader (ReaderT(..))
-import Control.Monad.State (runStateT)
+import Control.Monad.Reader (ReaderT(..), asks)
+import Control.Monad.State (evalStateT)
 
 import Telegram.Bot.FSAfe
 import SmartPrimitives.TextLenRange (unTextLenRange, TextLenRange (..))
@@ -45,24 +45,36 @@ import Control.Arrow ((&&&))
 import GHC.Generics (Generic)
 import Control.Monad.Except (runExceptT)
 import Data.List (sortOn, find, sort)
+import Control.Monad.IO.Class (liftIO)
 
 data InitialState = InitialState
 instance StateMessage InitialState where
   stateMessage _ = Send $
     textMessage (T.unlines
     [ "*Main commands:*"
-    , "/qr <qr> - View a receipt"
-    , "/contact <[@]username> - Add contact"
+    , "/qr \\<qr\\> \\- View a receipt"
+    , "/contact \\<\\[@\\]username\\> \\- Add contact"
     ])
     & withParseMode MarkdownV2
+
+data ViewingReceipt = ViewingReceipt Text [ReceiptItem]
+instance StateMessage ViewingReceipt where
+  stateMessage (ViewingReceipt _ items') = Edit $
+    textMessage (T.unlines
+    $ "Scanned receipt items: "
+    : map formatReceiptItem items)
+    & withInlineKeyboard
+      (row [callbackButton "Ok" Cancel, callbackButton "Select Items" StartSelectingReceiptItems])
+    where
+      items = sort items'
 
 data SelectingReceiptItems0 = SelectingReceiptItems0 Text [ReceiptItem]
 instance StateMessage SelectingReceiptItems0 where
   stateMessage (SelectingReceiptItems0 _ items') = Edit $
-    textMessage "Scanned receipt items: "
+    textMessage ("Selected receipt items: " <> tshow ([] @Int))
     & withInlineKeyboard
       [ col $ map toAddReceiptItemButton items
-      , single $ callbackButton "Ok" Cancel
+      , single $ callbackButton "Cancel"  Cancel
       ]
     where
       items = sort items'
@@ -71,7 +83,6 @@ instance StateMessage SelectingReceiptItems0 where
         in callbackButton prettyItem (AddReceiptItemCallbackData i)
 
 data SelectingReceiptItems = SelectingReceiptItems Text ReceiptItem [(Bool, ReceiptItem)]
-
 instance StateMessage SelectingReceiptItems where
   stateMessage (SelectingReceiptItems _ item0 items') = Edit $
     textMessage ("Selected receipt items: " <> tshow selectedIndices)
@@ -90,9 +101,24 @@ instance StateMessage SelectingReceiptItems where
           then callbackButton prettyItem (RemoveReceiptItemCallbackQuery i)
           else callbackButton prettyItem (AddReceiptItemCallbackData i)
 
-data SelectingRequestRecipient = SelectingRequestRecipient Text (NonEmpty ReceiptItem)
+data SelectingRequestRecipient =
+  SelectingRequestRecipient Text (NonEmpty ReceiptItem) [UserContact]
 instance StateMessage SelectingRequestRecipient where
-  stateMessage _ = NoMessage
+  stateMessage (SelectingRequestRecipient _ items contacts) = Send $
+      textMessage (T.unlines
+          $ ("В сумме на: " <> tshow receiptTotal)
+          : (view #name <$> NonEmpty.toList items))
+      & withInlineKeyboard
+        [ col $ map toSelectRequestRecipientButton contacts
+        , single $ callbackButton "Cancel" Cancel
+        ]
+    where
+      receiptTotal = ((`divideDouble` 100) . fromInteger) $ sum $ items <&> view #itemTotal
+
+      toSelectRequestRecipientButton
+        UserContact{contactUsername = TextLenRange contactUsername, mContactName, contactUserId} =
+        let name = maybe contactUsername unTextMaxLen mContactName
+        in callbackButton name (SelectRequestRecipient contactUserId)
 
 data Start = Start
   deriving (Generic, IsUnit)
@@ -107,13 +133,13 @@ instance HandleTransitionM Start InitialState InitialState AppM where
 data AddContact = AddContact UserQuery (Maybe (TextMaxLen 50))
 instance ParseTransition AddContact where
   parseTransition = do
-    txt <- text
+    txt <- command "contact"
     let (baseUsername, contactNamePart) = T.span (/= ' ') txt
         contactNameRaw = T.strip contactNamePart
     userQuery <- case T.uncons baseUsername of
       Nothing -> fail "empty username"
-      Just ('@', rest) -> pure $ UserUsernameQuery rest
-      Just _ ->           pure $ UserTgUsernameQuery txt
+      Just ('@', rest) -> pure $ UserTgUsernameQuery rest
+      Just _ ->           pure $ UserUsernameQuery txt
     contactNameResult <- case contactNameRaw of
       "" -> pure Nothing
       name -> case mkTextMaxLen name of
@@ -146,48 +172,38 @@ instance HandleTransitionM AddContact InitialState InitialState AppM where
             "contact " <> formattedUsername <> " successfully added"
 
       handleUserNotFound = case userQuery of
-        UserTgUserIdQuery{} -> do
-          sendText_ $ T.unlines
-            [ "User " <> formattedUsername <> " is not registered in check-check"
-            , "Send them the following link to join:"
-            ]
-          sendText_ "https://t.me/CheckCheckTgBot?start=start" -- TODO remove hardlink
+        UserTgUsernameQuery{} -> do
+          mBotName <- liftBot $ asks $ userUsername . botContextUser
+          case mBotName of
+            Just botName -> do
+              sendText_ $ T.unlines
+                [ userIsNotRegisteredLine
+                , "Send them the following link to join:"
+                ]
+              sendText_ $ "https://t.me/" <> botName <> "?start=start"
+            Nothing ->
+              sendText_ userIsNotRegisteredLine
         _ ->
-          sendText_ $ "User " <> formattedUsername <> " is not registered in check-check"
+          sendText_ userIsNotRegisteredLine
+        where
+          userIsNotRegisteredLine =
+            "User " <> formattedUsername <> " is not registered in check-check"
 
 newtype ShowReceipt = ShowReceipt Text
   deriving ParseTransition via Command "qr"
-instance RunReq BackendClientM m => HandleTransitionM ShowReceipt InitialState SelectingReceiptItems0 m where
+instance RunReq BackendClientM m => HandleTransitionM ShowReceipt InitialState ViewingReceipt m where
   handleTransitionM (ShowReceipt qr) InitialState = do
     ReceiptResp respItems <- runReq $ getReceipt qr
     let items = fromResp <$> respItems
-    return $ SelectingReceiptItems0 qr items
+    return $ ViewingReceipt qr items
 
-data Cancel = Cancel
+data StartSelectingReceiptItems = StartSelectingReceiptItems
   deriving (Read, Show)
-  deriving IsCallbackQuery via ReadShow Cancel
-  deriving ParseTransition via CallbackQueryData Cancel
-instance HandleTransitionM Cancel SelectingReceiptItems0 InitialState AppM where
-  handleTransitionM Cancel (SelectingReceiptItems0 _ items) = do
-    let msgTxt = T.unlines $ "Scanned receipt items: " : map formatReceiptItem items
-    send_ $ textMessage msgTxt -- was an edit
-    return InitialState
-
-instance HandleTransitionM Cancel SelectingReceiptItems InitialState AppM where
-  handleTransitionM Cancel (SelectingReceiptItems _ item0 items') = do
-    let items = (True, item0) : items'
-    let msgTxt = T.unlines $ "Scanned receipt items: " : map (formatReceiptItem . snd) items
-    send_ $ textMessage msgTxt -- was an edit
-    return InitialState
-
-instance HandleTransitionM Cancel SelectingRequestRecipient InitialState AppM where
-  handleTransitionM Cancel (SelectingRequestRecipient _ items) = do
-    let receiptTotal = ((`divideDouble` 100) . fromInteger) $ sum $ items <&> view #itemTotal
-    let replyMsg = T.unlines
-          $ ("В сумме на: " <> tshow receiptTotal)
-          : (view #name <$> NonEmpty.toList items)
-    send_ $ textMessage replyMsg -- was an edit
-    return InitialState
+  deriving IsCallbackQuery via ReadShow StartSelectingReceiptItems
+  deriving ParseTransition via CallbackQueryData StartSelectingReceiptItems
+instance HandleTransition StartSelectingReceiptItems ViewingReceipt SelectingReceiptItems0 where
+  handleTransition StartSelectingReceiptItems (ViewingReceipt qr items) =
+    SelectingReceiptItems0 qr items
 
 newtype AddReceiptItemCallbackData = AddReceiptItemCallbackData Int
   deriving (Read, Show)
@@ -213,7 +229,7 @@ instance ParseTransitionFrom SelectingReceiptItems AddReceiptItem where
 instance HandleTransition AddReceiptItem SelectingReceiptItems SelectingReceiptItems where
   handleTransition (AddReceiptItem item) (SelectingReceiptItems qr item0 initialItems) =
     let items = initialItems & traversed % unsafeFiltered ((item ==) . view _2) % _1 .~ True
-    in SelectingReceiptItems qr item0 items
+    in SelectingReceiptItems qr item0 items --
 
 newtype RemoveReceiptItemCallbackQuery = RemoveReceiptItemCallbackQuery Int
   deriving (Read, Show)
@@ -229,7 +245,7 @@ instance ParseTransitionFrom SelectingReceiptItems RemoveReceiptItem where
 instance HandleTransition RemoveReceiptItem SelectingReceiptItems SelectingReceiptItems where
   handleTransition (RemoveReceiptItem i) (SelectingReceiptItems qr item0 items) =
     let items' = items & traversed % unsafeFiltered ((i ==) . (^. _2 % #index)) % _1 .~ False
-    in SelectingReceiptItems qr item0 items'
+    in SelectingReceiptItems qr item0 items' --
 
 newtype ReplaceReceiptItem0 = ReplaceReceiptItem0 ReceiptItem
 instance ParseTransitionFrom SelectingReceiptItems ReplaceReceiptItem0 where
@@ -243,7 +259,7 @@ instance ParseTransitionFrom SelectingReceiptItems ReplaceReceiptItem0 where
 instance HandleTransition ReplaceReceiptItem0 SelectingReceiptItems SelectingReceiptItems where
   handleTransition (ReplaceReceiptItem0 newItem0) (SelectingReceiptItems qr item0 items) =
     let items' = (False, item0) : filter ((newItem0 /=) . view _2) items
-    in SelectingReceiptItems qr newItem0 items'
+    in SelectingReceiptItems qr newItem0 items' --
 
 data RemoveAllReceiptItems = RemoveAllReceiptItems
 instance ParseTransitionFrom SelectingReceiptItems RemoveAllReceiptItems where
@@ -260,29 +276,19 @@ data StartSelectingRequestRecipient = StartSelectingRequestRecipient
   deriving (Read, Show)
   deriving IsCallbackQuery via ReadShow StartSelectingRequestRecipient
   deriving ParseTransition via CallbackQueryData StartSelectingRequestRecipient
-
-instance HandleTransitionM StartSelectingRequestRecipient SelectingReceiptItems SelectingRequestRecipient AppM where
+instance HandleTransitionM StartSelectingRequestRecipient
+  SelectingReceiptItems SelectingRequestRecipient AppM where
   handleTransitionM StartSelectingRequestRecipient (SelectingReceiptItems qr item0 items0) = do
     let items = item0 :| map snd (filter fst items0)
+    let itemsList = NonEmpty.toList items
     let msgTxt = T.unlines
-          $ ("Selected receipt items: " <> tshow (NonEmpty.toList items <&> view #index))
+          $ ("Selected receipt items: " <> tshow (view #index <$> itemsList))
           : map (formatReceiptItem . snd) items0
-    sendText_ msgTxt
+    editUpdateMessage_ $ textMessage msgTxt
     token <- authViaTelegram =<< currentUser
     contactsResp <- runReq $ getContacts token
     let contacts = fromResp <$> contactsResp
-
-    let receiptTotal = ((`divideDouble` 100) . fromInteger) $ sum $ items <&> view #itemTotal
-    let msgTxt' = T.unlines
-          $ ("В сумме на: " <> tshow receiptTotal)
-          : (view #name <$> NonEmpty.toList items)
-    send_ $
-      textMessage msgTxt'
-      & withInlineKeyboard
-      [ col $ map toSelectRequestRecipientButton contacts
-      , single $ callbackButton "Cancel" Cancel
-      ]
-    return $ SelectingRequestRecipient qr items
+    return $ SelectingRequestRecipient qr items contacts
 
 newtype SelectRequestRecipient = SelectRequestRecipient UUID
   deriving (Read, Show)
@@ -291,7 +297,7 @@ newtype SelectRequestRecipient = SelectRequestRecipient UUID
 instance HandleTransitionM SelectRequestRecipient SelectingRequestRecipient InitialState AppM where
   handleTransitionM
     (SelectRequestRecipient recipientId)
-    (SelectingRequestRecipient receiptQr items)
+    (SelectingRequestRecipient receiptQr items _)
     = do
     let indices = items <&> view #index
     token <- authViaTelegram =<< currentUser
@@ -299,6 +305,29 @@ instance HandleTransitionM SelectRequestRecipient SelectingRequestRecipient Init
           {receiptQr, indexSelections = NonEmpty.singleton IndexSelectionReqBody{..}}
     runReq_ $ sendRequest token reqBody
     sendText_ "Request successfully sent"
+    return InitialState
+
+data Cancel = Cancel
+  deriving (Read, Show)
+  deriving IsCallbackQuery via ReadShow Cancel
+  deriving ParseTransition via CallbackQueryData Cancel
+instance MonadBot m => HandleTransitionM Cancel ViewingReceipt InitialState m where
+  handleTransitionM Cancel _ = do
+    editUpdateMessageReplyMarkup_ $ SomeInlineKeyboardMarkup $ col []
+    return InitialState
+instance MonadBot m => HandleTransitionM Cancel SelectingReceiptItems0 InitialState m where
+  handleTransitionM Cancel (SelectingReceiptItems0 _ items) = do
+    let msgTxt = T.unlines $ "Scanned receipt items: " : map formatReceiptItem items
+    editUpdateMessage_ $ textMessage msgTxt
+    return InitialState
+instance MonadBot m => HandleTransitionM Cancel SelectingReceiptItems InitialState m where
+  handleTransitionM Cancel (SelectingReceiptItems qr item0 items') =
+    let items = item0 : map snd items'
+    in handleTransitionM Cancel (SelectingReceiptItems0 qr items)
+
+instance MonadBot m => HandleTransitionM Cancel SelectingRequestRecipient InitialState m where
+  handleTransitionM Cancel SelectingRequestRecipient{} = do
+    editUpdateMessageReplyMarkup_ $ SomeInlineKeyboardMarkup $ col []
     return InitialState
 
 data RunConfig = RunConfig
@@ -310,6 +339,7 @@ data RunConfig = RunConfig
 
 type FSA =
  '[ '(InitialState, '[Start, AddContact, ShowReceipt])
+  , '(ViewingReceipt, '[StartSelectingReceiptItems, Cancel])
   , '(SelectingReceiptItems0, '[AddReceiptItem, Cancel])
   , '(SelectingReceiptItems,
      '[ AddReceiptItem
@@ -323,14 +353,15 @@ type FSA =
 run :: RunConfig -> IO ()
 run RunConfig{..} = do
   manager <- newManager defaultManagerSettings
-  let backendClientEnv = mkClientEnv manager beClientBaseUrl
-  let authClientEnv = mkClientEnv manager authClientBaseUrl
-  let secret = authApiKey
+  let backendClientEnv = mkClientEnv manager   beClientBaseUrl
+  let authClientEnv    = mkClientEnv manager authClientBaseUrl
 
   hoistStartKeyedBot_ (Proxy @FSA) (nt AppEnv{..}) updateChatId InitialState tgToken
-  where nt env (AppM app) = app `runReaderT` env `runStateT` Nothing & runExceptT >>= \case
-          Right (a, _) -> pure a
-          Left err -> do fail $ show err
+  where nt env (AppM app) = app `runReaderT` env `evalStateT` Nothing & runExceptT >>= \case
+          Right a -> pure a
+          Left err -> do
+            liftIO $ print err
+            fail $ show err
 
 main :: IO ()
 main = do
@@ -353,8 +384,3 @@ formatReceiptItem item@ReceiptItem{index, name, quantity}
   where
   priceSum = view #itemTotal item `divide` 100 :: Double
     where divide a b = fromIntegral a / b
-
-toSelectRequestRecipientButton :: UserContact -> InlineKeyboardButton
-toSelectRequestRecipientButton UserContact{ contactUsername = TextLenRange contactUsername, ..} =
-  let name = maybe contactUsername unTextMaxLen mContactName
-  in callbackButton name (SelectRequestRecipient contactUserId)

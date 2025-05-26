@@ -289,11 +289,11 @@
         "nixpkgs": "nixpkgs_4"
       },
       "locked": {
-        "lastModified": 1748202769,
-        "narHash": "sha256-SEzrbyRAYfGzuR4YeZdQwst1DmUENOqCHc94STr6GWw=",
+        "lastModified": 1748273984,
+        "narHash": "sha256-Rb8aSkm0LvogpJFicy62ZSh/s8pAIagVslNped4buK0=",
         "owner": "danielambda",
         "repo": "telegram-bot-fsafe",
-        "rev": "556f9bb0635d0b4fba462411fb651258060434f7",
+        "rev": "b768c9239a6ca0fe3c5bdbb179db7b681e5364b9",
         "type": "github"
       },
       "original": {

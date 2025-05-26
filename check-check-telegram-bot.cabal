@@ -48,7 +48,6 @@ executable check-check-telegram-bot
     , servant-client-core
     , smart-primitives
     , telegram-bot-api
-    , telegram-bot-simple
     , telegram-bot-fsafe
     , text
     , time

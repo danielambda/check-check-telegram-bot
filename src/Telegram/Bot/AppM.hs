@@ -45,7 +45,7 @@ instance FromClientError AppError where
 data AppEnv = AppEnv
   { backendClientEnv :: ClientEnv
   , authClientEnv :: ClientEnv
-  , secret :: String
+  , authApiKey :: String
   }
 
 instance HasKeyedClientEnv AppEnv "backend" where
@@ -64,8 +64,8 @@ authViaTelegram user = do
     Just (token, expirationTime) | afterFiveMinutes < expirationTime ->
       return token
     _ -> do
-      secret' <- asks secret
-      (token, expirationTime) <- runReq $ authTelegram secret' user
+      authApiKey <- asks authApiKey
+      (token, expirationTime) <- runReq $ authTelegram authApiKey user
       put $ Just (token, expirationTime)
       return token
 
