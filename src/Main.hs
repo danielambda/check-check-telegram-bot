@@ -44,8 +44,10 @@ import qualified Data.List.NonEmpty as NonEmpty
 import Control.Arrow ((&&&))
 import GHC.Generics (Generic)
 import Control.Monad.Except (runExceptT)
-import Data.List (sortOn, find, sort)
+import Data.List (sortOn, find, sort, (!?))
 import Control.Monad.IO.Class (liftIO)
+import Data.Time (showGregorian, UTCTime (utctDay))
+import CheckCheck.Contracts.Users.IncomingRequests (CompleteIncomingRequestReqBody(..), CompleteIncomingRequestResp (..))
 
 data InitialState = InitialState
 instance StateMessage InitialState where
@@ -54,6 +56,7 @@ instance StateMessage InitialState where
     [ "*Main commands:*"
     , "/qr \\<qr\\> \\- View a receipt"
     , "/contact \\<\\[@\\]username\\> \\- Add contact"
+    , "/requests \\- See all incoming requests"
     ])
     & withParseMode MarkdownV2
 
@@ -64,7 +67,7 @@ instance StateMessage ViewingReceipt where
     $ "Scanned receipt items: "
     : map formatReceiptItem items)
     & withInlineKeyboard
-      (row [callbackButton "Ok" Cancel, callbackButton "Select Items" StartSelectingReceiptItems])
+      (row [button "Ok" Cancel, button "Select Items" StartSelectingReceiptItems])
     where
       items = sort items'
 
@@ -74,13 +77,13 @@ instance StateMessage SelectingReceiptItems0 where
     textMessage ("Selected receipt items: " <> tshow ([] @Int))
     & withInlineKeyboard
       [ col $ map toAddReceiptItemButton items
-      , single $ callbackButton "Cancel"  Cancel
+      , single $ button "Cancel"  Cancel
       ]
     where
       items = sort items'
       toAddReceiptItemButton item =
         let (i, prettyItem) = view #index &&& formatReceiptItem $ item
-        in callbackButton prettyItem (AddReceiptItemCallbackData i)
+        in button prettyItem (AddReceiptItemCallbackData i)
 
 data SelectingReceiptItems = SelectingReceiptItems Text ReceiptItem [(Bool, ReceiptItem)]
 instance StateMessage SelectingReceiptItems where
@@ -88,8 +91,8 @@ instance StateMessage SelectingReceiptItems where
     textMessage ("Selected receipt items: " <> tshow selectedIndices)
     & withInlineKeyboard
       [ col $ map toToggleReceiptItemButton items
-      , row [ callbackButton "Confirm" StartSelectingRequestRecipient
-            , callbackButton "Cancel"  Cancel
+      , row [ button "Cancel" Cancel
+            , button "Confirm" StartSelectingRequestRecipient
             ]
       ]
     where
@@ -98,8 +101,8 @@ instance StateMessage SelectingReceiptItems where
       toToggleReceiptItemButton (isAdded, item) =
         let (i, prettyItem) = view #index &&& formatReceiptItem $ item
         in if isAdded
-          then callbackButton prettyItem (RemoveReceiptItemCallbackQuery i)
-          else callbackButton prettyItem (AddReceiptItemCallbackData i)
+          then button prettyItem (RemoveReceiptItemCallbackQuery i)
+          else button prettyItem (AddReceiptItemCallbackData i)
 
 data SelectingRequestRecipient =
   SelectingRequestRecipient Text (NonEmpty ReceiptItem) [UserContact]
@@ -110,7 +113,7 @@ instance StateMessage SelectingRequestRecipient where
           : (view #name <$> NonEmpty.toList items))
       & withInlineKeyboard
         [ col $ map toSelectRequestRecipientButton contacts
-        , single $ callbackButton "Cancel" Cancel
+        , single $ button "Cancel" Cancel
         ]
     where
       receiptTotal = ((`divideDouble` 100) . fromInteger) $ sum $ items <&> view #itemTotal
@@ -118,7 +121,43 @@ instance StateMessage SelectingRequestRecipient where
       toSelectRequestRecipientButton
         UserContact{contactUsername = TextLenRange contactUsername, mContactName, contactUserId} =
         let name = maybe contactUsername unTextMaxLen mContactName
-        in callbackButton name (SelectRequestRecipient contactUserId)
+        in button name (SelectRequestRecipient contactUserId)
+
+data ViewingRequests = ViewingRequests
+  { requests :: [Request]
+  , showPending :: Bool
+  }
+instance StateMessage ViewingRequests where
+  stateMessage ViewingRequests{requests, showPending} = Edit $
+    textMessage "All incoming requests: "
+    & withInlineKeyboard
+      [ col $ zipWith (curry toShowRequestButton) [0..] filteredRequests
+      , single $ button "Ok" Cancel
+      ]
+    where
+      filteredRequests = if showPending
+        then requests
+        else filter isPending requests
+
+      toShowRequestButton (i, req) = button (formatRequest req) (ShowRequestCallback i)
+
+data ViewingRequest = ViewingRequest Request ViewingRequests
+instance StateMessage ViewingRequest where
+  stateMessage (ViewingRequest req _) = Edit $
+    textMessage (T.unlines
+    $ (if req ^. #isPending then "Request is pending 👻" else "Request is done ✅")
+    : map formatRequestItem (req ^.. #items))
+    & withInlineKeyboard
+      [ row $ if req ^. #isPending
+          then [ button ("Pay " <> tshow (req ^. #requestTotal)) PayForRequest
+               , button "Mark Done" MarkRequestCompleted
+               ]
+          else []
+      , single $ button "Back" Cancel
+      ]
+    where
+      formatRequestItem RequestItem{identity, price, quantity} =
+        identity <> " x " <> tshow price <> " = " <> tshow quantity <> " rub"
 
 data Start = Start
   deriving (Generic, IsUnit)
@@ -307,6 +346,63 @@ instance HandleTransitionM SelectRequestRecipient SelectingRequestRecipient Init
     sendText_ "Request successfully sent"
     return InitialState
 
+data ShowRequests = ShowRequests
+  deriving (Generic, IsUnit)
+  deriving ParseTransition via CommandUnit "requests" ShowRequests
+instance HandleTransitionM ShowRequests InitialState ViewingRequests AppM where
+  handleTransitionM ShowRequests InitialState = do
+    token <- authViaTelegram =<< currentUser
+    requests <- map fromResp <$> runReq (getIncomingRequests token)
+    return ViewingRequests{requests, showPending = True}
+
+newtype ShowRequestCallback = ShowRequestCallback Int
+  deriving (Read, Show)
+  deriving IsCallbackQuery via ReadShow ShowRequestCallback
+newtype ShowRequest = ShowRequest Request
+  deriving (Read, Show)
+instance ParseTransitionFrom ViewingRequests ShowRequest where
+  parseTransitionFrom (ViewingRequests requests _) = do
+    ShowRequestCallback i <- callbackQueryDataRead
+    requests !? i & maybe (fail "how!?") (return . ShowRequest)
+instance HandleTransition ShowRequest ViewingRequests ViewingRequest where
+  handleTransition (ShowRequest req) state@ViewingRequests{} = ViewingRequest req state
+
+data PayForRequest = PayForRequest
+  deriving (Read, Show)
+  deriving IsCallbackQuery via ReadShow PayForRequest
+  deriving ParseTransition via CallbackQueryData PayForRequest
+instance HandleTransitionM PayForRequest ViewingRequest InitialState AppM where
+  handleTransitionM PayForRequest (ViewingRequest Request{requestId} _) = do
+    token <- authViaTelegram =<< currentUser
+    let reqBody = PayForReqBody {roundingStrategy=Nothing, roundingEps=Nothing}
+    resp <- runReq $ completeIncomingRequest token requestId reqBody
+    editUpdateMessageReplyMarkup_ $ SomeInlineKeyboardMarkup $ col []
+    let msgTxt = case resp of
+          PayedForResp budgetResp ->
+            let Budget{isLowerBoundExceeded, amount} = fromResp budgetResp
+            in if isLowerBoundExceeded
+              then "Your budget lower bound is exceeded: " <> tshow amount
+              else "Your current budget: " <> tshow amount
+
+          _ -> "Something went wrong"
+    sendText_ msgTxt
+    return InitialState
+
+data MarkRequestCompleted = MarkRequestCompleted
+  deriving (Read, Show)
+  deriving IsCallbackQuery via ReadShow MarkRequestCompleted
+  deriving ParseTransition via CallbackQueryData MarkRequestCompleted
+instance HandleTransitionM MarkRequestCompleted ViewingRequest InitialState AppM where
+  handleTransitionM MarkRequestCompleted (ViewingRequest Request{requestId} _) = do
+    token <- authViaTelegram =<< currentUser
+    resp <- runReq $ completeIncomingRequest token requestId MarkCompletedReqBody
+    editUpdateMessageReplyMarkup_ $ SomeInlineKeyboardMarkup $ col []
+    let msgTxt = case resp of
+          MarkedCompletedResp -> "Request successfully marked completed"
+          _ -> "Something went wrong"
+    sendText_ msgTxt
+    return InitialState
+
 data Cancel = Cancel
   deriving (Read, Show)
   deriving IsCallbackQuery via ReadShow Cancel
@@ -330,6 +426,14 @@ instance MonadBot m => HandleTransitionM Cancel SelectingRequestRecipient Initia
     editUpdateMessageReplyMarkup_ $ SomeInlineKeyboardMarkup $ col []
     return InitialState
 
+instance MonadBot m => HandleTransitionM Cancel ViewingRequests InitialState m where
+  handleTransitionM Cancel ViewingRequests{} = do
+    editUpdateMessageReplyMarkup_ $ SomeInlineKeyboardMarkup $ col []
+    return InitialState
+
+instance HandleTransition Cancel ViewingRequest ViewingRequests where
+  handleTransition Cancel (ViewingRequest _ state) = state
+
 data RunConfig = RunConfig
   { authApiKey :: String
   , tgToken :: TG.Token
@@ -338,7 +442,7 @@ data RunConfig = RunConfig
   }
 
 type FSA =
- '[ '(InitialState, '[Start, AddContact, ShowReceipt])
+ '[ '(InitialState, '[Start, AddContact, ShowReceipt, ShowRequests])
   , '(ViewingReceipt, '[StartSelectingReceiptItems, Cancel])
   , '(SelectingReceiptItems0, '[AddReceiptItem, Cancel])
   , '(SelectingReceiptItems,
@@ -348,6 +452,8 @@ type FSA =
       , Cancel
       ])
   , '(SelectingRequestRecipient, '[SelectRequestRecipient, Cancel])
+  , '(ViewingRequests, '[ShowRequest, Cancel])
+  , '(ViewingRequest, '[MarkRequestCompleted, PayForRequest, Cancel])
   ]
 
 run :: RunConfig -> IO ()
@@ -384,3 +490,15 @@ formatReceiptItem item@ReceiptItem{index, name, quantity}
   where
   priceSum = view #itemTotal item `divide` 100 :: Double
     where divide a b = fromIntegral a / b
+
+formatRequest :: Request -> Text
+formatRequest req
+  =   T.pack (showGregorian $ utctDay $ req ^. #createdAt)
+  <> ": "
+  <> tshow priceSum
+  <> " rub"
+  <> if req ^. #isPending then "" else " ✅"
+  where
+  priceSum = (req ^. #requestTotal) `divide` 100 :: Double
+    where divide a b = fromIntegral a / b
+
