@@ -7,7 +7,6 @@ build-type:     Simple
 executable check-check-telegram-bot
   main-is: Main.hs
   other-modules:
-      Clients.AuthService
       Clients.Backend
       Clients.Utils
       Models
@@ -39,11 +38,8 @@ executable check-check-telegram-bot
     , http-client
     , jose
     , mtl
-    , optics
     , resource-pool
     , servant
-    , servant-auth
-    , servant-auth-client
     , servant-client
     , servant-client-core
     , smart-primitives
